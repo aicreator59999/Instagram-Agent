@@ -82,10 +82,17 @@ export interface InstagramConfig {
   accountType: 'Business' | 'Creator' | 'Not Connected';
   instagramAccountId: string;
   facebookPageId: string;
+  facebookPageName?: string;
   accessToken: string;
   username: string;
+  name?: string;
   profilePictureUrl?: string;
   testMode: boolean;
+  permissionsGranted?: string[];
+  connectedAt?: string;
+  metaAppId?: string;
+  metaAppSecret?: string;
+  authMethod?: 'oauth_meta_graph' | 'sandbox_oauth';
   lastTestedAt?: string;
   lastTestStatus?: 'success' | 'error' | null;
   lastErrorMessage?: string | null;

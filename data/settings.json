@@ -1,0 +1,86 @@
+{
+  "contentSettings": {
+    "platform": "Instagram",
+    "niche": "Technology",
+    "targetAudience": "Tech enthusiasts, developers, and aspiring founders",
+    "language": "English",
+    "tone": "Inspirational",
+    "postType": "image",
+    "frequency": "Daily",
+    "preferredPostingTime": "10:00",
+    "timezone": "UTC"
+  },
+  "instagramConfig": {
+    "isConnected": false,
+    "accountType": "Not Connected",
+    "instagramAccountId": "17841400998877665",
+    "facebookPageId": "102938475610293",
+    "accessToken": "",
+    "username": "test_creator",
+    "testMode": true,
+    "lastTestStatus": null,
+    "lastErrorMessage": null,
+    "hasToken": false,
+    "facebookPageName": "Creator Official Page",
+    "authMethod": "sandbox_oauth",
+    "permissionsGranted": [
+      "instagram_basic",
+      "instagram_content_publish",
+      "pages_show_list",
+      "pages_read_engagement"
+    ],
+    "connectedAt": "2026-10-10T10:37:30.369Z"
+  },
+  "automationConfig": {
+    "dailyAutomationEnabled": false,
+    "dailyPostingTime": "15:57",
+    "timezone": "Asia/Kolkata",
+    "autoPublish": false,
+    "logs": [
+      {
+        "id": "log-1791628660479",
+        "timestamp": "2026-10-10T10:37:40.479Z",
+        "action": "Instagram Disconnected",
+        "status": "warning",
+        "message": "Instagram Professional account disconnected."
+      },
+      {
+        "id": "log-1791628650369",
+        "timestamp": "2026-10-10T10:37:30.369Z",
+        "action": "Instagram Account Authorized",
+        "status": "success",
+        "message": "Successfully connected @test_creator. Account ID automatically detected (17841400998877665)."
+      },
+      {
+        "id": "log-1791628114080",
+        "timestamp": "2026-10-10T10:28:34.080Z",
+        "action": "Post Published (Test Mode)",
+        "status": "success",
+        "message": "Post \"Turning Invisible Logic Into Tangible Realities\" published to Instagram Sandbox (ID: ig_test_1791628114072).",
+        "postId": "post-1791628004979"
+      },
+      {
+        "id": "log-1791627973267",
+        "timestamp": "2026-10-10T10:26:13.267Z",
+        "action": "Post Published (Test Mode)",
+        "status": "success",
+        "message": "Post \"From Terminal to Production: The Builder Mindset Shift\" published to Instagram Sandbox (ID: ig_test_1791627973259).",
+        "postId": "post-1791627574556"
+      },
+      {
+        "id": "log-1791627941357",
+        "timestamp": "2026-10-10T10:25:41.357Z",
+        "action": "Daily Automation Failed",
+        "status": "error",
+        "message": "{\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}"
+      },
+      {
+        "id": "log-init",
+        "timestamp": "2026-10-10T10:01:27.170Z",
+        "action": "System initialized",
+        "status": "success",
+        "message": "Content Post Agent initialized with safe draft defaults."
+      }
+    ]
+  }
+}

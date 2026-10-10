@@ -508,6 +508,13 @@ export default function App() {
             onSaveConfig={async (updated) => {
               await handleUpdateSettings({ instagramConfig: updated });
             }}
+            onRefreshSettings={async () => {
+              const res = await fetch('/api/settings');
+              if (res.ok) {
+                const s = await res.json();
+                setSettings(s);
+              }
+            }}
             onShowToast={showToast}
           />
         )}

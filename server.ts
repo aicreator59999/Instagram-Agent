@@ -1,0 +1,1105 @@
+import express, { Request, Response } from 'express';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
+import path from 'path';
+import fs from 'fs';
+import dotenv from 'dotenv';
+import { createServer as createViteServer } from 'vite';
+import {
+  Post,
+  AppSettings,
+  ContentSettings,
+  InstagramConfig,
+  AutomationConfig,
+  PostType,
+  Language,
+  Tone,
+  Niche,
+} from './src/types.js';
+
+dotenv.config();
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const DATA_DIR = path.resolve(process.cwd(), 'data');
+const POSTS_FILE = path.join(DATA_DIR, 'posts.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// Initial default settings
+const defaultSettings: AppSettings = {
+  contentSettings: {
+    platform: 'Instagram',
+    niche: 'Technology',
+    targetAudience: 'Tech enthusiasts, developers, and aspiring founders',
+    language: 'English',
+    tone: 'Inspirational',
+    postType: 'image',
+    frequency: 'Daily',
+    preferredPostingTime: '10:00',
+    timezone: 'UTC',
+  },
+  instagramConfig: {
+    isConnected: false,
+    accountType: 'Not Connected',
+    instagramAccountId: '',
+    facebookPageId: '',
+    accessToken: '',
+    username: 'content_creator_hub',
+    testMode: true, // Enabled for seamless beginner onboarding & safe testing
+    lastTestedAt: undefined,
+    lastTestStatus: null,
+    lastErrorMessage: null,
+  },
+  automationConfig: {
+    dailyAutomationEnabled: false,
+    dailyPostingTime: '10:00',
+    timezone: 'UTC',
+    autoPublish: false, // strictly requires approval by default
+    logs: [
+      {
+        id: 'log-init',
+        timestamp: new Date().toISOString(),
+        action: 'System initialized',
+        status: 'success',
+        message: 'Content Post Agent initialized with safe draft defaults.',
+      },
+    ],
+  },
+};
+
+// Seed sample posts for rich initial UI
+const seedPosts: Post[] = [
+  {
+    id: 'post-seed-1',
+    title: '5 AI Tools Every Creator Needs in 2026',
+    caption: `Are you still editing your content manually? Here are 5 AI superpowers you should plug into your workflow this week.\n\n1. Smart Voice Refinement: clean background noise with zero acoustic loss.\n2. Visual Prompt Synthesizers: generate custom slide graphics in 5 seconds.\n3. Dynamic Caption Sync: auto-generate accurate subtitles with zero frame lag.\n4. Micro-Hook Analyzers: score your opening 3 seconds before publishing.\n5. Automated Repurposing: turn 1 long-form video into 10 viral reels.\n\nWhich tool are you testing first? Drop a comment below!`,
+    hashtags: [
+      '#ContentCreation',
+      '#AITools2026',
+      '#ProductivityHacks',
+      '#CreatorEconomy',
+      '#DigitalMarketing',
+      '#TechTrends',
+      '#InstagramGrowth',
+      '#WorkflowTips',
+    ],
+    callToAction: 'Save this post for your next content batch!',
+    imagePrompt:
+      'A sleek, high-tech desk workspace with holographic glowing widgets showing content analytics, ambient neon purple and cyan lighting, hyper-detailed minimalist aesthetic, 8k resolution.',
+    imageUrl: null,
+    postType: 'image',
+    niche: 'AI',
+    language: 'English',
+    tone: 'Educational',
+    targetAudience: 'Creators & Tech enthusiasts',
+    status: 'draft',
+    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+    scheduledDate: new Date(Date.now() + 3600000 * 4).toISOString(),
+    publishedAt: null,
+    instagramPostId: null,
+  },
+  {
+    id: 'post-seed-2',
+    title: 'Stop Overcomplicating Your First Tech Startup',
+    caption: `Most founders fail before launch because they build features nobody asked for.\n\nHere is the 3-step validation rule:\n- Talk to 10 potential customers before writing a single line of code.\n- Build a prototype that solves ONE painful bottleneck.\n- Charge from day one.\n\nIf people won't pay for your simplest solution, they won't pay for your complex platform either.\n\nKeep it focused. Ship fast. Learn daily.`,
+    hashtags: [
+      '#StartupAdvice',
+      '#Entrepreneurship',
+      '#BuildInPublic',
+      '#TechFounders',
+      '#BusinessMindset',
+      '#GrowthStrategy',
+    ],
+    callToAction: 'Share this with a founder who needs to hear it today!',
+    imagePrompt:
+      'Minimalist modern typography poster on textured matte slate background, bold geometric lines, editorial Swiss graphic design, high contrast.',
+    imageUrl: null,
+    postType: 'image',
+    niche: 'Business',
+    language: 'English',
+    tone: 'Inspirational',
+    targetAudience: 'Founders & Builders',
+    status: 'approved',
+    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
+    scheduledDate: new Date(Date.now() + 3600000 * 24).toISOString(),
+    publishedAt: null,
+    instagramPostId: null,
+  },
+  {
+    id: 'post-seed-3',
+    title: 'How Neural Networks Actually Learn (Simple Breakdown)',
+    caption: `Think neural networks are black magic? Let's demystify backpropagation in 30 seconds.\n\nImagine learning to throw darts blindfolded. Someone tells you 'too far left' (the error gradient). Next throw, you adjust slightly to the right (weight updates).\n\nRepeat 100,000 times until you hit the bullseye every single time. That is gradient descent in action!`,
+    hashtags: [
+      '#MachineLearning',
+      '#DeepLearning',
+      '#LearnAI',
+      '#ComputerScience',
+      '#TechEducation',
+      '#DataScience',
+    ],
+    callToAction: 'Double tap if this made machine learning click for you!',
+    imagePrompt:
+      'Abstract glowing neural network nodes with luminous golden pathways, dark navy backdrop, futuristic scientific illustration.',
+    imageUrl: null,
+    postType: 'carousel',
+    carouselSlides: [
+      {
+        slideNumber: 1,
+        header: 'How Neural Networks Actually Learn',
+        body: 'Demystifying machine learning without complex math or jargon.',
+        visualStyle: 'Glowing neural nodes on dark background with bold header',
+      },
+      {
+        slideNumber: 2,
+        header: '1. The Blind Dartboard Analogy',
+        body: 'Every initial guess is completely random. The magic begins when you measure how far off target you were.',
+        visualStyle: 'Dartboard target graphic with measurement vector',
+      },
+      {
+        slideNumber: 3,
+        header: '2. Gradient Descent: The Tiny Nudge',
+        body: 'Weights adjust backward through each layer to minimize prediction errors.',
+        visualStyle: '3D smooth topography curve illustrating gradient descent descent',
+      },
+      {
+        slideNumber: 4,
+        header: '3. Repetition Creates Intelligence',
+        body: 'Billions of mini adjustments turn noise into coherent recognition.',
+        visualStyle: 'Clean summary diagram connecting inputs, hidden layers, and outputs',
+      },
+    ],
+    niche: 'Education',
+    language: 'English',
+    tone: 'Educational',
+    targetAudience: 'Beginner coders & students',
+    status: 'scheduled',
+    createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+    scheduledDate: new Date(Date.now() + 3600000 * 8).toISOString(),
+    publishedAt: null,
+    instagramPostId: null,
+  },
+  {
+    id: 'post-seed-4',
+    title: 'The 3-Second Rule That Tripled My Reel Retention',
+    caption: `If your viewer scrolls in the first 3 seconds, the algorithm buries your video.\n\nHere is the exact framework to fix it:\n\n1. No Greetings: Never say 'Hey guys!' Start directly inside the action.\n2. Visual Disruption: Change angle, zoom, or text within the first 1.5 seconds.\n3. Curiosity Gap: Promise an answer that only arrives at the end.\n\nTry this on your next video and watch your retention graph spike!`,
+    hashtags: [
+      '#ReelsTips',
+      '#ContentGrowth',
+      '#SocialMediaMarketing',
+      '#VideoEditing',
+      '#ViralReels',
+      '#CreatorTips',
+    ],
+    callToAction: 'Follow for daily content growth frameworks!',
+    imagePrompt:
+      'Cinematic vertical 9:16 frame of a creator holding a mirrorless camera with neon blue rim light, dynamic motion blur, high energy.',
+    imageUrl: null,
+    postType: 'reel',
+    reelScript: [
+      {
+        sceneNumber: 1,
+        durationSeconds: 3,
+        visualCue: 'Fast snap zoom onto phone screen displaying a flat retention graph',
+        voiceover: 'Stop saying "Hey guys!" in the first 3 seconds of your Reel.',
+        onScreenText: 'DELETE THIS OPENING ❌',
+      },
+      {
+        sceneNumber: 2,
+        durationSeconds: 5,
+        visualCue: 'Screen splits showing side-by-side comparison of high vs low hooks',
+        voiceover: 'Instead, start right in the middle of a mistake your audience makes every day.',
+        onScreenText: 'HOOK FORMULA: Problem First 🎯',
+      },
+      {
+        sceneNumber: 3,
+        durationSeconds: 7,
+        visualCue: 'Quick cuts showcasing motion zoom, dynamic subtitles, sound effects',
+        voiceover: 'Pair it with a visual disruption before second two. Check the caption for the full retention checklist.',
+        onScreenText: 'Full Breakdown Below 👇',
+      },
+    ],
+    niche: 'Technology',
+    language: 'English',
+    tone: 'Friendly',
+    targetAudience: 'Reel creators',
+    status: 'published',
+    createdAt: new Date(Date.now() - 3600000 * 72).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 70).toISOString(),
+    scheduledDate: new Date(Date.now() - 3600000 * 70).toISOString(),
+    publishedAt: new Date(Date.now() - 3600000 * 70).toISOString(),
+    instagramPostId: 'ig_seed_published_908123',
+  },
+];
+
+// File I/O Helpers
+function loadPosts(): Post[] {
+  try {
+    if (fs.existsSync(POSTS_FILE)) {
+      const data = fs.readFileSync(POSTS_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+    fs.writeFileSync(POSTS_FILE, JSON.stringify(seedPosts, null, 2));
+    return seedPosts;
+  } catch (err) {
+    console.error('Error reading posts file, falling back to seed data:', err);
+    return seedPosts;
+  }
+}
+
+function savePosts(posts: Post[]): void {
+  try {
+    fs.writeFileSync(POSTS_FILE, JSON.stringify(posts, null, 2));
+  } catch (err) {
+    console.error('Error writing posts file:', err);
+  }
+}
+
+function loadSettings(): AppSettings {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      return {
+        ...defaultSettings,
+        ...parsed,
+        contentSettings: { ...defaultSettings.contentSettings, ...(parsed.contentSettings || {}) },
+        instagramConfig: { ...defaultSettings.instagramConfig, ...(parsed.instagramConfig || {}) },
+        automationConfig: { ...defaultSettings.automationConfig, ...(parsed.automationConfig || {}) },
+      };
+    }
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(defaultSettings, null, 2));
+    return defaultSettings;
+  } catch (err) {
+    console.error('Error reading settings file, falling back to defaults:', err);
+    return defaultSettings;
+  }
+}
+
+function saveSettings(settings: AppSettings): void {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  } catch (err) {
+    console.error('Error writing settings file:', err);
+  }
+}
+
+// Gemini Client initialization
+const apiKey = process.env.GEMINI_API_KEY || '';
+const ai = new GoogleGenAI({
+  apiKey,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    },
+  },
+});
+
+// Helper to mask sensitive credentials before sending to client
+function sanitizeSettings(settings: AppSettings) {
+  return {
+    ...settings,
+    instagramConfig: {
+      ...settings.instagramConfig,
+      accessToken: settings.instagramConfig.accessToken
+        ? `••••••••${settings.instagramConfig.accessToken.slice(-4)}`
+        : '',
+      hasToken: Boolean(settings.instagramConfig.accessToken),
+    },
+  };
+}
+
+// Background scheduler for daily automation
+let lastDailyCheckDate = '';
+function runSchedulerTick() {
+  const settings = loadSettings();
+  const { automationConfig, contentSettings, instagramConfig } = settings;
+
+  if (!automationConfig.dailyAutomationEnabled) return;
+
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0, 10);
+  const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(
+    now.getUTCMinutes()
+  ).padStart(2, '0')}`;
+
+  // Check if target posting time matched and hasn't run yet today
+  if (currentTime === automationConfig.dailyPostingTime && lastDailyCheckDate !== todayKey) {
+    lastDailyCheckDate = todayKey;
+    triggerDailyAutomation(settings, 'Scheduled Daily Runner');
+  }
+}
+
+async function triggerDailyAutomation(settings: AppSettings, triggerSource: string) {
+  try {
+    const posts = loadPosts();
+    const recentTitles = posts.slice(0, 5).map((p) => p.title);
+
+    console.log(`[Automation] Triggering post generation via ${triggerSource}...`);
+    const generated = await generateContentViaGemini(
+      settings.contentSettings,
+      recentTitles
+    );
+
+    const newPost: Post = {
+      id: `post-${Date.now()}`,
+      title: generated.title,
+      caption: generated.caption,
+      hashtags: generated.hashtags,
+      callToAction: generated.callToAction,
+      imagePrompt: generated.imagePrompt,
+      imageUrl: null,
+      postType: settings.contentSettings.postType,
+      niche: settings.contentSettings.niche,
+      language: settings.contentSettings.language,
+      tone: settings.contentSettings.tone,
+      targetAudience: settings.contentSettings.targetAudience,
+      status: 'draft', // By default saved as draft requiring approval
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      scheduledDate: new Date(Date.now() + 3600000 * 2).toISOString(),
+      publishedAt: null,
+      instagramPostId: null,
+      reelScript: generated.reelScript,
+      carouselSlides: generated.carouselSlides,
+      isAutomated: true,
+    };
+
+    // Auto-publishing is strictly gated
+    let publishNote = 'Saved as draft pending human review.';
+    if (
+      settings.automationConfig.autoPublish &&
+      (settings.instagramConfig.isConnected || settings.instagramConfig.testMode)
+    ) {
+      if (settings.instagramConfig.testMode) {
+        newPost.status = 'published';
+        newPost.publishedAt = new Date().toISOString();
+        newPost.instagramPostId = `ig_auto_test_${Date.now()}`;
+        publishNote = 'Auto-published via Instagram Test Sandbox.';
+      }
+    }
+
+    posts.unshift(newPost);
+    savePosts(posts);
+
+    // Update log
+    settings.automationConfig.lastRunAt = new Date().toISOString();
+    settings.automationConfig.logs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      action: 'Daily Post Generated',
+      status: 'success',
+      message: `Generated "${newPost.title}". ${publishNote}`,
+      postId: newPost.id,
+    });
+    if (settings.automationConfig.logs.length > 30) {
+      settings.automationConfig.logs = settings.automationConfig.logs.slice(0, 30);
+    }
+    saveSettings(settings);
+    console.log(`[Automation] Successfully generated daily post: ${newPost.title}`);
+  } catch (err: any) {
+    console.error('[Automation] Daily run error:', err);
+    settings.automationConfig.logs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      action: 'Daily Automation Failed',
+      status: 'error',
+      message: err.message || 'Failed to generate scheduled post',
+    });
+    saveSettings(settings);
+  }
+}
+
+// Check every 60 seconds
+setInterval(runSchedulerTick, 60000);
+
+// Gemini Generation Core Logic
+async function generateContentViaGemini(
+  contentSettings: ContentSettings,
+  recentTitles: string[] = []
+) {
+  const nicheName =
+    contentSettings.niche === 'Custom' && contentSettings.customNiche
+      ? contentSettings.customNiche
+      : contentSettings.niche;
+
+  const prompt = `You are an elite Instagram content strategist and copywriter.
+Create a high-performing Instagram post with the following specifications:
+- Platform: Instagram
+- Topic/Niche: ${nicheName}
+- Target Audience: ${contentSettings.targetAudience}
+- Language: ${contentSettings.language}
+- Tone of Voice: ${contentSettings.tone}
+- Post Type: ${contentSettings.postType} (can be 'image', 'carousel', or 'reel')
+
+RULES:
+1. Ground your advice in real, authentic best practices. DO NOT invent fake statistics, fake scientific studies, or unsupported claims.
+2. The language MUST be strictly ${contentSettings.language}. If Telugu is requested, use clean Telugu or Telugu script. If Hindi is requested, use clean Hindi or Hinglish suitable for modern social media. If Bilingual, use engaging natural conversational code-switching.
+3. The caption must include an irresistible opening hook (first 1-2 lines), structured body with line breaks or bullet points, clear actionable value, and natural emoji usage.
+4. Provide 15 to 25 relevant hashtags (mix of broad, niche, and community tags). Include the '#' symbol on each.
+5. Create a compelling Call to Action (CTA).
+6. Create an exact, highly descriptive visual image generation prompt detailing lighting, composition, camera style, colors, and subject matter without text clutter.
+7. If postType is 'reel', provide a structured 3-5 scene script with duration in seconds, visual cue, voiceover, and on-screen text.
+8. If postType is 'carousel', provide 4-6 slide breakdowns with slide number, catchy header, value body text, and visual design direction.
+9. Avoid repeating or re-using these recent topics: ${JSON.stringify(recentTitles)}. Come up with a fresh, original angle.
+
+Respond with strict JSON following the schema.`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.8-flash',
+    contents: prompt,
+    config: {
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          title: {
+            type: Type.STRING,
+            description: 'Catchy internal title/concept for the post (max 10 words)',
+          },
+          caption: {
+            type: Type.STRING,
+            description: 'Complete Instagram caption with hook, body, and formatting',
+          },
+          hashtags: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: '15-25 curated hashtags starting with #',
+          },
+          callToAction: {
+            type: Type.STRING,
+            description: 'Punchy call to action (e.g. Save this for later, comment YES)',
+          },
+          imagePrompt: {
+            type: Type.STRING,
+            description: 'Detailed prompt for an image generator or designer',
+          },
+          reelScript: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                sceneNumber: { type: Type.INTEGER },
+                durationSeconds: { type: Type.INTEGER },
+                visualCue: { type: Type.STRING },
+                voiceover: { type: Type.STRING },
+                onScreenText: { type: Type.STRING },
+              },
+              required: ['sceneNumber', 'durationSeconds', 'visualCue', 'voiceover', 'onScreenText'],
+            },
+            description: 'Reel breakdown if postType is reel',
+          },
+          carouselSlides: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                slideNumber: { type: Type.INTEGER },
+                header: { type: Type.STRING },
+                body: { type: Type.STRING },
+                visualStyle: { type: Type.STRING },
+              },
+              required: ['slideNumber', 'header', 'body', 'visualStyle'],
+            },
+            description: 'Slide breakdown if postType is carousel',
+          },
+        },
+        required: ['title', 'caption', 'hashtags', 'callToAction', 'imagePrompt'],
+      },
+    },
+  });
+
+  const parsed = JSON.parse(response.text || '{}');
+  return parsed;
+}
+
+// Main Server Setup
+async function startServer() {
+  const app = express();
+  app.use(express.json({ limit: '20mb' }));
+
+  // --- API ROUTES ---
+
+  // Health check & status
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY),
+      time: new Date().toISOString(),
+    });
+  });
+
+  // Settings GET & POST
+  app.get('/api/settings', (_req: Request, res: Response) => {
+    const settings = loadSettings();
+    res.json(sanitizeSettings(settings));
+  });
+
+  app.post('/api/settings', (req: Request, res: Response) => {
+    try {
+      const current = loadSettings();
+      const body = req.body || {};
+
+      const updated: AppSettings = {
+        ...current,
+        contentSettings: body.contentSettings
+          ? { ...current.contentSettings, ...body.contentSettings }
+          : current.contentSettings,
+        automationConfig: body.automationConfig
+          ? { ...current.automationConfig, ...body.automationConfig }
+          : current.automationConfig,
+        instagramConfig: body.instagramConfig
+          ? {
+              ...current.instagramConfig,
+              ...body.instagramConfig,
+              // If incoming accessToken is empty/masked, keep existing token
+              accessToken:
+                body.instagramConfig.accessToken &&
+                !body.instagramConfig.accessToken.includes('••••')
+                  ? body.instagramConfig.accessToken
+                  : current.instagramConfig.accessToken,
+            }
+          : current.instagramConfig,
+      };
+
+      saveSettings(updated);
+      res.json({ success: true, settings: sanitizeSettings(updated) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to save settings' });
+    }
+  });
+
+  // Posts CRUD
+  app.get('/api/posts', (_req: Request, res: Response) => {
+    const posts = loadPosts();
+    res.json(posts);
+  });
+
+  app.post('/api/posts', (req: Request, res: Response) => {
+    try {
+      const posts = loadPosts();
+      const body = req.body;
+      const newPost: Post = {
+        id: body.id || `post-${Date.now()}`,
+        title: body.title || 'Untitled Post',
+        caption: body.caption || '',
+        hashtags: Array.isArray(body.hashtags) ? body.hashtags : [],
+        callToAction: body.callToAction || '',
+        imagePrompt: body.imagePrompt || '',
+        imageUrl: body.imageUrl || null,
+        postType: body.postType || 'image',
+        niche: body.niche || 'Technology',
+        language: body.language || 'English',
+        tone: body.tone || 'Friendly',
+        targetAudience: body.targetAudience || 'Followers',
+        status: body.status || 'draft',
+        createdAt: body.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        scheduledDate: body.scheduledDate || null,
+        publishedAt: body.publishedAt || null,
+        instagramPostId: body.instagramPostId || null,
+        reelScript: body.reelScript,
+        carouselSlides: body.carouselSlides,
+        isAutomated: Boolean(body.isAutomated),
+      };
+
+      posts.unshift(newPost);
+      savePosts(posts);
+      res.json({ success: true, post: newPost });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to save post' });
+    }
+  });
+
+  app.put('/api/posts/:id', (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const posts = loadPosts();
+      const index = posts.findIndex((p) => p.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+
+      const existing = posts[index];
+      const updated: Post = {
+        ...existing,
+        ...req.body,
+        id: existing.id, // prevent changing id
+        updatedAt: new Date().toISOString(),
+      };
+
+      posts[index] = updated;
+      savePosts(posts);
+      res.json({ success: true, post: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update post' });
+    }
+  });
+
+  app.delete('/api/posts/:id', (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      let posts = loadPosts();
+      posts = posts.filter((p) => p.id !== id);
+      savePosts(posts);
+      res.json({ success: true, message: 'Post deleted successfully' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete post' });
+    }
+  });
+
+  // Feature 2: Generate Post with Gemini
+  app.post('/api/generate-post', async (req: Request, res: Response) => {
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({
+          error:
+            'GEMINI_API_KEY is not configured on the server. Please check the AI Studio secrets configuration.',
+        });
+      }
+
+      const contentSettings: ContentSettings = req.body.settings;
+      const posts = loadPosts();
+      const recentTitles = posts.slice(0, 8).map((p) => p.title);
+
+      const generated = await generateContentViaGemini(contentSettings, recentTitles);
+
+      const post: Post = {
+        id: `post-${Date.now()}`,
+        title: generated.title,
+        caption: generated.caption,
+        hashtags: generated.hashtags || [],
+        callToAction: generated.callToAction,
+        imagePrompt: generated.imagePrompt,
+        imageUrl: null,
+        postType: contentSettings.postType,
+        niche: contentSettings.niche === 'Custom' && contentSettings.customNiche ? contentSettings.customNiche : contentSettings.niche,
+        language: contentSettings.language,
+        tone: contentSettings.tone,
+        targetAudience: contentSettings.targetAudience,
+        status: 'draft',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        scheduledDate: null,
+        publishedAt: null,
+        instagramPostId: null,
+        reelScript: generated.reelScript,
+        carouselSlides: generated.carouselSlides,
+      };
+
+      res.json({ success: true, post });
+    } catch (err: any) {
+      console.error('Error in /api/generate-post:', err);
+      res.status(500).json({
+        error: err.message || 'Failed to generate post with Gemini',
+      });
+    }
+  });
+
+  // Feature 4: Regenerate Caption Only
+  app.post('/api/regenerate-caption', async (req: Request, res: Response) => {
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: 'GEMINI_API_KEY is missing on server.' });
+      }
+
+      const { postTitle, niche, language, tone, targetAudience, currentCaption } = req.body;
+
+      const prompt = `You are an elite Instagram copywriter.
+A creator already has this post idea: "${postTitle}" (Topic: ${niche}, Audience: ${targetAudience}, Language: ${language}, Tone: ${tone}).
+Their current caption is: "${currentCaption}".
+
+Generate a completely FRESH, high-retention alternative caption with a new opening hook, clean body formatting, 15-20 relevant hashtags, and a distinct Call to Action.
+The caption must be strictly written in ${language}. DO NOT invent unsupported facts.
+
+Respond with strict JSON:
+{
+  "caption": "...",
+  "hashtags": ["#tag1", "#tag2", ...],
+  "callToAction": "..."
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              caption: { type: Type.STRING },
+              hashtags: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              callToAction: { type: Type.STRING },
+            },
+            required: ['caption', 'hashtags', 'callToAction'],
+          },
+        },
+      });
+
+      const parsed = JSON.parse(response.text || '{}');
+      res.json({ success: true, ...parsed });
+    } catch (err: any) {
+      console.error('Error in /api/regenerate-caption:', err);
+      res.status(500).json({ error: err.message || 'Failed to regenerate caption' });
+    }
+  });
+
+  // Feature 3: Image Generation Endpoint
+  app.post('/api/generate-image', async (req: Request, res: Response) => {
+    const { prompt, aspectRatio = '1:1' } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    try {
+      // Attempt generation using gemini-3.1-flash-lite-image
+      const validRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
+      const ratio = validRatios.includes(aspectRatio) ? aspectRatio : '1:1';
+
+      console.log(`[Image] Attempting generation with gemini-3.1-flash-lite-image: "${prompt.slice(0, 40)}..."`);
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite-image',
+        contents: {
+          parts: [{ text: prompt }],
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: ratio as any,
+          },
+        },
+      });
+
+      let foundImageUrl: string | null = null;
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData && part.inlineData.data) {
+            const mime = part.inlineData.mimeType || 'image/png';
+            foundImageUrl = `data:${mime};base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+      }
+
+      if (foundImageUrl) {
+        return res.json({ success: true, imageUrl: foundImageUrl });
+      }
+
+      // If no image part returned, provide clear status
+      res.json({
+        success: false,
+        fallback: true,
+        prompt,
+        message: 'The model responded without inline image bytes. Use the prompt below or upload your graphic.',
+      });
+    } catch (err: any) {
+      console.warn('Image generation capability returned:', err.message);
+      // Clean, beginner-friendly fallback response
+      res.json({
+        success: false,
+        fallback: true,
+        prompt,
+        message:
+          err.message?.includes('RESOURCE_EXHAUSTED') || err.message?.includes('not found') || err.message?.includes('PERMISSION_DENIED')
+            ? 'AI Image Generation model requires active tier quota. You can copy the exact prompt below or upload a graphic.'
+            : (err.message || 'Image generation unavailable'),
+      });
+    }
+  });
+
+  // Feature 6: Instagram Publishing API Test Connection
+  app.post('/api/instagram/test-connection', async (req: Request, res: Response) => {
+    try {
+      const { instagramAccountId, accessToken, testMode } = req.body;
+
+      if (testMode) {
+        const settings = loadSettings();
+        settings.instagramConfig.isConnected = true;
+        settings.instagramConfig.testMode = true;
+        settings.instagramConfig.accountType = 'Creator';
+        settings.instagramConfig.lastTestedAt = new Date().toISOString();
+        settings.instagramConfig.lastTestStatus = 'success';
+        settings.instagramConfig.lastErrorMessage = null;
+        saveSettings(settings);
+
+        return res.json({
+          success: true,
+          mode: 'test_sandbox',
+          username: settings.instagramConfig.username || 'content_creator_hub',
+          accountType: 'Professional (Sandbox Test Mode)',
+          message: 'Connection verified in Safe Test Mode! You can test publishing workflows safely.',
+        });
+      }
+
+      if (!instagramAccountId || !accessToken) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Please provide both the Instagram Business/Creator Account ID and the Meta Access Token.',
+        });
+      }
+
+      // Real Meta Graph API check
+      const graphUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(
+        instagramAccountId
+      )}?fields=id,username,name,profile_picture_url&access_token=${encodeURIComponent(
+        accessToken
+      )}`;
+
+      const metaRes = await fetch(graphUrl);
+      const data: any = await metaRes.json();
+
+      if (!metaRes.ok || data.error) {
+        const errorMsg = data.error?.message || `Meta API Error (${metaRes.status})`;
+        const settings = loadSettings();
+        settings.instagramConfig.isConnected = false;
+        settings.instagramConfig.lastTestedAt = new Date().toISOString();
+        settings.instagramConfig.lastTestStatus = 'error';
+        settings.instagramConfig.lastErrorMessage = errorMsg;
+        saveSettings(settings);
+
+        return res.status(400).json({
+          success: false,
+          error: errorMsg,
+          details: data.error,
+          hint: 'Ensure your Instagram account is linked to a Facebook Page and the token has "instagram_content_publish" scope.',
+        });
+      }
+
+      // Success
+      const settings = loadSettings();
+      settings.instagramConfig.isConnected = true;
+      settings.instagramConfig.username = data.username || settings.instagramConfig.username;
+      settings.instagramConfig.accountType = 'Business';
+      settings.instagramConfig.profilePictureUrl = data.profile_picture_url;
+      settings.instagramConfig.lastTestedAt = new Date().toISOString();
+      settings.instagramConfig.lastTestStatus = 'success';
+      settings.instagramConfig.lastErrorMessage = null;
+      saveSettings(settings);
+
+      res.json({
+        success: true,
+        username: data.username,
+        name: data.name,
+        profilePictureUrl: data.profile_picture_url,
+        message: 'Successfully connected to Instagram Professional Account!',
+      });
+    } catch (err: any) {
+      console.error('Error testing Instagram connection:', err);
+      res.status(500).json({
+        success: false,
+        error: err.message || 'Network error verifying Instagram connection',
+      });
+    }
+  });
+
+  // Feature 6: Publish Post to Instagram
+  app.post('/api/instagram/publish', async (req: Request, res: Response) => {
+    try {
+      const { postId } = req.body;
+      if (!postId) {
+        return res.status(400).json({ error: 'Post ID is required' });
+      }
+
+      const posts = loadPosts();
+      const post = posts.find((p) => p.id === postId);
+
+      if (!post) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+
+      // Duplicate publishing safeguard
+      if (post.status === 'published' && post.instagramPostId) {
+        return res.status(400).json({
+          error: `This post was already published on ${new Date(
+            post.publishedAt || ''
+          ).toLocaleString()} (Instagram ID: ${post.instagramPostId}). Duplicate publishing is blocked.`,
+        });
+      }
+
+      const settings = loadSettings();
+      const igConfig = settings.instagramConfig;
+
+      // Check if Instagram connection is active
+      if (!igConfig.isConnected && !igConfig.testMode) {
+        return res.status(400).json({
+          error:
+            'No active Instagram Professional connection found. Connect your Instagram account in Settings, or enable Safe Sandbox Test Mode to test the publishing flow.',
+          code: 'INSTAGRAM_NOT_CONNECTED',
+        });
+      }
+
+      // Safe Sandbox Test Mode
+      if (igConfig.testMode) {
+        const simulatedPostId = `ig_test_${Date.now()}`;
+        post.status = 'published';
+        post.publishedAt = new Date().toISOString();
+        post.instagramPostId = simulatedPostId;
+        post.updatedAt = new Date().toISOString();
+
+        savePosts(posts);
+
+        // Log action
+        settings.automationConfig.logs.unshift({
+          id: `log-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          action: 'Post Published (Test Mode)',
+          status: 'success',
+          message: `Post "${post.title}" published to Instagram Sandbox (ID: ${simulatedPostId}).`,
+          postId: post.id,
+        });
+        saveSettings(settings);
+
+        return res.json({
+          success: true,
+          mode: 'sandbox_test',
+          instagramPostId: simulatedPostId,
+          publishedAt: post.publishedAt,
+          message:
+            'Post successfully verified and published in Instagram Sandbox Test Mode! Status updated to Published.',
+          post,
+        });
+      }
+
+      // Live Official Meta Graph API publishing
+      if (!post.imageUrl) {
+        return res.status(400).json({
+          error:
+            'The official Instagram Content Publishing API requires a public image URL or media asset to publish.',
+        });
+      }
+
+      const fullCaption = `${post.caption}\n\n${post.hashtags.join(' ')}`;
+
+      // Step 1: Create media container
+      const containerUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(
+        igConfig.instagramAccountId
+      )}/media`;
+      const containerRes = await fetch(containerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: post.imageUrl,
+          caption: fullCaption,
+          access_token: igConfig.accessToken,
+        }),
+      });
+
+      const containerData: any = await containerRes.json();
+      if (!containerRes.ok || !containerData.id) {
+        return res.status(400).json({
+          error:
+            containerData.error?.message ||
+            'Failed to create Instagram media container. Check permissions and image accessibility.',
+          details: containerData.error,
+        });
+      }
+
+      const containerId = containerData.id;
+
+      // Step 2: Publish media container
+      const publishUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(
+        igConfig.instagramAccountId
+      )}/media_publish`;
+      const publishRes = await fetch(publishUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creation_id: containerId,
+          access_token: igConfig.accessToken,
+        }),
+      });
+
+      const publishData: any = await publishRes.json();
+      if (!publishRes.ok || !publishData.id) {
+        return res.status(400).json({
+          error:
+            publishData.error?.message ||
+            'Failed to finalize Instagram publication container.',
+          details: publishData.error,
+        });
+      }
+
+      const realPostId = publishData.id;
+      post.status = 'published';
+      post.publishedAt = new Date().toISOString();
+      post.instagramPostId = realPostId;
+      post.updatedAt = new Date().toISOString();
+      savePosts(posts);
+
+      settings.automationConfig.logs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        action: 'Post Published (Live API)',
+        status: 'success',
+        message: `Post "${post.title}" published to live Instagram account @${igConfig.username} (ID: ${realPostId}).`,
+        postId: post.id,
+      });
+      saveSettings(settings);
+
+      res.json({
+        success: true,
+        mode: 'live_meta_api',
+        instagramPostId: realPostId,
+        publishedAt: post.publishedAt,
+        message: `Post successfully published to Instagram! (ID: ${realPostId})`,
+        post,
+      });
+    } catch (err: any) {
+      console.error('Error publishing to Instagram:', err);
+      res.status(500).json({
+        error: err.message || 'Internal error while publishing to Instagram',
+      });
+    }
+  });
+
+  // Feature 7: Manual Daily Automation Trigger
+  app.post('/api/automation/trigger-now', async (_req: Request, res: Response) => {
+    try {
+      const settings = loadSettings();
+      await triggerDailyAutomation(settings, 'Manual Dashboard Trigger');
+      const updatedSettings = loadSettings();
+      const posts = loadPosts();
+      res.json({
+        success: true,
+        message: 'Daily automation triggered successfully! Check new draft post and activity log.',
+        settings: sanitizeSettings(updatedSettings),
+        latestPost: posts[0],
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to trigger automation' });
+    }
+  });
+
+  // --- VITE MIDDLEWARE / STATIC ASSETS ---
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.resolve(process.cwd(), 'dist')));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(path.resolve(process.cwd(), 'dist', 'index.html'));
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Content Post Agent server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Fatal server boot error:', err);
+  process.exit(1);
+});

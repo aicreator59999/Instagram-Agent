@@ -1,0 +1,6 @@
+{
+  "name": "Content Post Agent",
+  "description": "Smart Instagram post generator and publishing assistant powered by Gemini. Create tailored captions, hashtags, Reels scripts, and visuals with scheduling, calendar, and official publishing workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

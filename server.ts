@@ -302,40 +302,186 @@ const ai = new GoogleGenAI({
 
 // Helper to mask sensitive credentials before sending to client
 function sanitizeSettings(settings: AppSettings) {
+  const rawToken = settings.instagramConfig.accessToken || '';
+  const isSimulated =
+    rawToken.startsWith('EAAB_token_') ||
+    settings.instagramConfig.authMethod === 'sandbox_oauth';
+
   return {
     ...settings,
     instagramConfig: {
       ...settings.instagramConfig,
-      accessToken: settings.instagramConfig.accessToken
-        ? `••••••••${settings.instagramConfig.accessToken.slice(-4)}`
-        : '',
+      accessToken: rawToken ? `••••••••${rawToken.slice(-4)}` : '',
       metaAppSecret: settings.instagramConfig.metaAppSecret
         ? `••••••••${settings.instagramConfig.metaAppSecret.slice(-4)}`
         : '',
-      hasToken: Boolean(settings.instagramConfig.accessToken),
-      hasAppSecret: Boolean(settings.instagramConfig.metaAppSecret || process.env.META_APP_SECRET),
+      hasToken: Boolean(rawToken),
+      hasAppSecret: Boolean(
+        settings.instagramConfig.metaAppSecret || process.env.META_APP_SECRET
+      ),
+      isSimulatedToken: isSimulated,
     },
   };
 }
 
-// Background scheduler for daily automation
+// Background scheduler for daily automation & individual scheduled posts
 let lastDailyCheckDate = '';
-function runSchedulerTick() {
+async function runSchedulerTick() {
+  try {
+    const settings = loadSettings();
+    const { automationConfig } = settings;
+
+    // 1. Check individual scheduled posts whose scheduledDate has arrived
+    await checkAndPublishScheduledPosts();
+
+    // 2. Check recurring daily post generator
+    if (!automationConfig.dailyAutomationEnabled) return;
+
+    const now = new Date();
+    const todayKey = now.toISOString().slice(0, 10);
+    const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(
+      now.getUTCMinutes()
+    ).padStart(2, '0')}`;
+
+    if (currentTime === automationConfig.dailyPostingTime && lastDailyCheckDate !== todayKey) {
+      lastDailyCheckDate = todayKey;
+      triggerDailyAutomation(settings, 'Scheduled Daily Runner');
+    }
+  } catch (tickErr) {
+    console.error('[Scheduler] Tick error:', tickErr);
+  }
+}
+
+async function checkAndPublishScheduledPosts() {
+  const posts = loadPosts();
   const settings = loadSettings();
-  const { automationConfig, contentSettings, instagramConfig } = settings;
-
-  if (!automationConfig.dailyAutomationEnabled) return;
-
   const now = new Date();
-  const todayKey = now.toISOString().slice(0, 10);
-  const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(
-    now.getUTCMinutes()
-  ).padStart(2, '0')}`;
+  let updatedAny = false;
 
-  // Check if target posting time matched and hasn't run yet today
-  if (currentTime === automationConfig.dailyPostingTime && lastDailyCheckDate !== todayKey) {
-    lastDailyCheckDate = todayKey;
-    triggerDailyAutomation(settings, 'Scheduled Daily Runner');
+  for (let i = 0; i < posts.length; i++) {
+    const post = posts[i];
+    if (post.status === 'scheduled' && post.scheduledDate) {
+      const schedTime = new Date(post.scheduledDate);
+      if (schedTime <= now) {
+        console.log(`[Scheduler] Scheduled time reached for post: "${post.title}" (ID: ${post.id})`);
+        const igConfig = settings.instagramConfig;
+
+        if (!igConfig.isConnected && !igConfig.testMode) {
+          console.warn(`[Scheduler] Cannot publish post "${post.title}": Instagram is not connected.`);
+          settings.automationConfig.logs.unshift({
+            id: `log-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            action: 'Scheduled Publish Failed',
+            status: 'error',
+            message: `Scheduled post "${post.title}" reached its time, but no active Instagram account is connected.`,
+            postId: post.id,
+          });
+          continue;
+        }
+
+        // Safe Sandbox Test Mode
+        if (igConfig.testMode) {
+          const simulatedPostId = `ig_scheduled_test_${Date.now()}`;
+          post.status = 'published';
+          post.publishedAt = new Date().toISOString();
+          post.instagramPostId = simulatedPostId;
+          post.updatedAt = new Date().toISOString();
+          updatedAny = true;
+
+          settings.automationConfig.logs.unshift({
+            id: `log-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            action: 'Scheduled Post Published (Sandbox)',
+            status: 'success',
+            message: `Scheduled post "${post.title}" published in Instagram Sandbox Test Mode (ID: ${simulatedPostId}).`,
+            postId: post.id,
+          });
+          continue;
+        }
+
+        // Check if token is a Sandbox simulation token in Live Mode
+        if (igConfig.accessToken?.startsWith('EAAB_token_') || igConfig.authMethod === 'sandbox_oauth') {
+          console.warn(`[Scheduler] Cannot publish post "${post.title}": Connected with Sandbox simulation token in Live mode.`);
+          settings.automationConfig.logs.unshift({
+            id: `log-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            action: 'Scheduled Publish Blocked',
+            status: 'error',
+            message: `Scheduled post "${post.title}" could not publish live because the account is using a Sandbox simulation token (EAAB_token_...). Meta Graph API rejects simulation tokens. Switch to Sandbox Test Mode or supply an authentic Meta Access Token in Instagram Setup.`,
+            postId: post.id,
+          });
+          continue;
+        }
+
+        // Live Instagram Meta API Publishing
+        if (!post.imageUrl) {
+          console.warn(`[Scheduler] Cannot publish post "${post.title}": Missing image asset.`);
+          settings.automationConfig.logs.unshift({
+            id: `log-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            action: 'Scheduled Publish Failed',
+            status: 'error',
+            message: `Scheduled post "${post.title}" reached its time, but has no image attached. The official Instagram API requires an image.`,
+            postId: post.id,
+          });
+          continue;
+        }
+
+        try {
+          const fullCaption = `${post.caption}\n\n${post.hashtags.join(' ')}`;
+          const containerRes = await fetch(
+            `https://graph.facebook.com/v19.0/${encodeURIComponent(igConfig.instagramAccountId)}/media`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image_url: post.imageUrl,
+                caption: fullCaption,
+                access_token: igConfig.accessToken,
+              }),
+            }
+          );
+          const containerData: any = await containerRes.json();
+          if (containerData.id) {
+            const publishRes = await fetch(
+              `https://graph.facebook.com/v19.0/${encodeURIComponent(igConfig.instagramAccountId)}/media_publish`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  creation_id: containerData.id,
+                  access_token: igConfig.accessToken,
+                }),
+              }
+            );
+            const publishData: any = await publishRes.json();
+            if (publishData.id) {
+              post.status = 'published';
+              post.publishedAt = new Date().toISOString();
+              post.instagramPostId = publishData.id;
+              post.updatedAt = new Date().toISOString();
+              updatedAny = true;
+
+              settings.automationConfig.logs.unshift({
+                id: `log-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                action: 'Scheduled Post Published (Live)',
+                status: 'success',
+                message: `Scheduled post "${post.title}" published live to @${igConfig.username} (ID: ${publishData.id}).`,
+                postId: post.id,
+              });
+            }
+          }
+        } catch (pubErr: any) {
+          console.error(`[Scheduler] Live publish error for "${post.title}":`, pubErr);
+        }
+      }
+    }
+  }
+
+  if (updatedAny) {
+    savePosts(posts);
+    saveSettings(settings);
   }
 }
 
@@ -537,6 +683,33 @@ async function startServer() {
       hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY),
       time: new Date().toISOString(),
     });
+  });
+
+  // Public media endpoint for Instagram Graph API crawler
+  app.get('/api/media/:id.png', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const posts = loadPosts();
+    const post = posts.find((p) => p.id === id);
+
+    if (!post || !post.imageUrl) {
+      return res.status(404).send('Media not found');
+    }
+
+    if (post.imageUrl.startsWith('data:image/')) {
+      const matches = post.imageUrl.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+      if (matches && matches[2]) {
+        const buffer = Buffer.from(matches[2], 'base64');
+        res.setHeader('Content-Type', matches[1] || 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(buffer);
+      }
+    }
+
+    if (post.imageUrl.startsWith('http')) {
+      return res.redirect(post.imageUrl);
+    }
+
+    res.status(404).send('Invalid media format');
   });
 
   // Settings GET & POST
@@ -829,9 +1002,9 @@ Respond with strict JSON:
   app.post('/api/instagram/test-connection', async (req: Request, res: Response) => {
     try {
       const { instagramAccountId, accessToken, testMode } = req.body;
+      const settings = loadSettings();
 
       if (testMode) {
-        const settings = loadSettings();
         settings.instagramConfig.isConnected = true;
         settings.instagramConfig.testMode = true;
         settings.instagramConfig.accountType = 'Creator';
@@ -849,7 +1022,36 @@ Respond with strict JSON:
         });
       }
 
-      if (!instagramAccountId || !accessToken) {
+      // Resolve token if masked or omitted
+      let effectiveToken = accessToken;
+      if (!effectiveToken || effectiveToken.includes('••••')) {
+        effectiveToken = settings.instagramConfig.accessToken;
+      }
+
+      const effectiveAccountId =
+        instagramAccountId || settings.instagramConfig.instagramAccountId;
+
+      if (!effectiveToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'No Meta Access Token found. Please provide your token.',
+        });
+      }
+
+      // If token is a simulation token
+      if (
+        effectiveToken.startsWith('EAAB_token_') ||
+        settings.instagramConfig.authMethod === 'sandbox_oauth'
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'SIMULATED_TOKEN',
+          error: `Current token is a Sandbox simulation token (${effectiveToken.slice(0, 15)}...). Meta's live API will reject this token as "malformed access token". Switch to Sandbox Test Mode to test inside the app, or provide an authentic Meta Access Token.`,
+          isSimulatedToken: true,
+        });
+      }
+
+      if (!effectiveAccountId) {
         return res.status(400).json({
           success: false,
           error:
@@ -859,17 +1061,20 @@ Respond with strict JSON:
 
       // Real Meta Graph API check
       const graphUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(
-        instagramAccountId
+        effectiveAccountId
       )}?fields=id,username,name,profile_picture_url&access_token=${encodeURIComponent(
-        accessToken
+        effectiveToken
       )}`;
 
       const metaRes = await fetch(graphUrl);
       const data: any = await metaRes.json();
 
       if (!metaRes.ok || data.error) {
-        const errorMsg = data.error?.message || `Meta API Error (${metaRes.status})`;
-        const settings = loadSettings();
+        let errorMsg = data.error?.message || `Meta API Error (${metaRes.status})`;
+        if (errorMsg.toLowerCase().includes('malformed access token')) {
+          errorMsg = `Meta API rejected this token as malformed or invalid (${effectiveToken.slice(0, 15)}...). Authentic Meta tokens are ~200 characters long generated from Meta for Developers.`;
+        }
+
         settings.instagramConfig.isConnected = false;
         settings.instagramConfig.lastTestedAt = new Date().toISOString();
         settings.instagramConfig.lastTestStatus = 'error';
@@ -885,7 +1090,6 @@ Respond with strict JSON:
       }
 
       // Success
-      const settings = loadSettings();
       settings.instagramConfig.isConnected = true;
       settings.instagramConfig.username = data.username || settings.instagramConfig.username;
       settings.instagramConfig.accountType = 'Business';
@@ -893,6 +1097,7 @@ Respond with strict JSON:
       settings.instagramConfig.lastTestedAt = new Date().toISOString();
       settings.instagramConfig.lastTestStatus = 'success';
       settings.instagramConfig.lastErrorMessage = null;
+      settings.instagramConfig.authMethod = 'oauth_meta_graph';
       saveSettings(settings);
 
       res.json({
@@ -900,13 +1105,131 @@ Respond with strict JSON:
         username: data.username,
         name: data.name,
         profilePictureUrl: data.profile_picture_url,
-        message: 'Successfully connected to Instagram Professional Account!',
+        message: 'Successfully verified and connected to Instagram Professional Account!',
       });
     } catch (err: any) {
       console.error('Error testing Instagram connection:', err);
       res.status(500).json({
         success: false,
         error: err.message || 'Network error verifying Instagram connection',
+      });
+    }
+  });
+
+  // Feature 6b: Direct Real Meta Token Connection
+  app.post('/api/instagram/connect-token', async (req: Request, res: Response) => {
+    try {
+      const { accessToken, instagramAccountId } = req.body;
+      if (!accessToken || typeof accessToken !== 'string' || !accessToken.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Please enter a valid Meta Access Token.',
+        });
+      }
+
+      const cleanToken = accessToken.trim();
+
+      if (cleanToken.startsWith('EAAB_token_')) {
+        return res.status(400).json({
+          success: false,
+          error: 'This is a Sandbox demonstration token. Please provide a real Meta Access Token starting with "EAA..." generated from developers.facebook.com.',
+        });
+      }
+
+      const settings = loadSettings();
+
+      // Attempt 1: If account ID provided, test directly
+      if (instagramAccountId && instagramAccountId.trim()) {
+        const cleanId = instagramAccountId.trim();
+        const testUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(cleanId)}?fields=id,username,name,profile_picture_url&access_token=${encodeURIComponent(cleanToken)}`;
+        const testRes = await fetch(testUrl);
+        const testData: any = await testRes.json();
+
+        if (testRes.ok && testData.id) {
+          settings.instagramConfig.isConnected = true;
+          settings.instagramConfig.accessToken = cleanToken;
+          settings.instagramConfig.instagramAccountId = testData.id;
+          settings.instagramConfig.username = testData.username || cleanId;
+          settings.instagramConfig.accountType = 'Business';
+          settings.instagramConfig.authMethod = 'oauth_meta_graph';
+          settings.instagramConfig.connectedAt = new Date().toISOString();
+          settings.instagramConfig.lastTestedAt = new Date().toISOString();
+          settings.instagramConfig.lastTestStatus = 'success';
+          settings.instagramConfig.lastErrorMessage = null;
+          saveSettings(settings);
+
+          return res.json({
+            success: true,
+            message: `Successfully connected to @${testData.username || cleanId}!`,
+            settings: sanitizeSettings(settings),
+          });
+        }
+      }
+
+      // Attempt 2: Auto-discover Instagram business account via /me/accounts
+      const accountsUrl = `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name,profile_picture_url}&access_token=${encodeURIComponent(cleanToken)}`;
+      const accountsRes = await fetch(accountsUrl);
+      const accountsData: any = await accountsRes.json();
+
+      let discoveredIg: any = null;
+      let discoveredPage: any = null;
+
+      if (accountsData.data && Array.isArray(accountsData.data)) {
+        for (const page of accountsData.data) {
+          if (page.instagram_business_account) {
+            discoveredIg = page.instagram_business_account;
+            discoveredPage = page;
+            break;
+          }
+        }
+      }
+
+      if (discoveredIg && discoveredPage) {
+        settings.instagramConfig.isConnected = true;
+        settings.instagramConfig.accessToken = cleanToken;
+        settings.instagramConfig.instagramAccountId = discoveredIg.id;
+        settings.instagramConfig.username = discoveredIg.username || settings.instagramConfig.username;
+        settings.instagramConfig.facebookPageId = discoveredPage.id;
+        settings.instagramConfig.facebookPageName = discoveredPage.name;
+        settings.instagramConfig.accountType = 'Business';
+        settings.instagramConfig.authMethod = 'oauth_meta_graph';
+        settings.instagramConfig.connectedAt = new Date().toISOString();
+        settings.instagramConfig.lastTestedAt = new Date().toISOString();
+        settings.instagramConfig.lastTestStatus = 'success';
+        settings.instagramConfig.lastErrorMessage = null;
+        saveSettings(settings);
+
+        return res.json({
+          success: true,
+          message: `Auto-discovered and linked Instagram Business account @${discoveredIg.username} (ID: ${discoveredIg.id}) via Facebook Page "${discoveredPage.name}"!`,
+          settings: sanitizeSettings(settings),
+        });
+      }
+
+      // Attempt 3: If me/accounts did not contain IG, check /me
+      const meUrl = `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(cleanToken)}`;
+      const meRes = await fetch(meUrl);
+      const meData: any = await meRes.json();
+
+      if (!meRes.ok || meData.error) {
+        return res.status(400).json({
+          success: false,
+          error: meData.error?.message || 'Invalid Meta Access Token. Meta rejected the token.',
+          details: meData.error,
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error:
+          'Meta token is valid for user "' +
+          (meData.name || meData.id) +
+          '", but no linked Instagram Business/Creator Account was found on your Facebook Pages. Please link your Instagram account to a Facebook Page in Meta Business Suite, or enter your Instagram Account ID explicitly.',
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: err.message || 'Failed to verify and save Meta token',
       });
     }
   });
@@ -979,6 +1302,20 @@ Respond with strict JSON:
         });
       }
 
+      // Check if trying to publish in Live Mode using a Sandbox simulation token
+      if (
+        igConfig.accessToken?.startsWith('EAAB_token_') ||
+        igConfig.authMethod === 'sandbox_oauth'
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'SIMULATED_TOKEN_IN_LIVE_MODE',
+          error: `Cannot publish to live Instagram feed using Sandbox simulation token (${igConfig.accessToken.slice(0, 15)}...). Meta Graph API rejects simulation tokens in Live Mode.`,
+          hint: 'Quick choices: 1) Switch to Sandbox Test Mode in Instagram Setup to test safely inside the studio, or 2) Enter a real Meta Access Token from Meta for Developers to publish to your live Instagram profile.',
+          isSimulatedToken: true,
+        });
+      }
+
       // Live Official Meta Graph API publishing
       if (!post.imageUrl) {
         return res.status(400).json({
@@ -989,6 +1326,13 @@ Respond with strict JSON:
 
       const fullCaption = `${post.caption}\n\n${post.hashtags.join(' ')}`;
 
+      // Resolve public image URL for Meta's crawlers
+      let publicImageUrl = post.imageUrl;
+      if (post.imageUrl.startsWith('data:image/')) {
+        const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+        publicImageUrl = `${appUrl}/api/media/${post.id}.png`;
+      }
+
       // Step 1: Create media container
       const containerUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(
         igConfig.instagramAccountId
@@ -997,7 +1341,7 @@ Respond with strict JSON:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image_url: post.imageUrl,
+          image_url: publicImageUrl,
           caption: fullCaption,
           access_token: igConfig.accessToken,
         }),
@@ -1005,10 +1349,15 @@ Respond with strict JSON:
 
       const containerData: any = await containerRes.json();
       if (!containerRes.ok || !containerData.id) {
+        let errorMsg =
+          containerData.error?.message ||
+          'Failed to create Instagram media container. Check permissions and image accessibility.';
+        if (errorMsg.toLowerCase().includes('malformed access token')) {
+          errorMsg = `Meta API rejected the Access Token as malformed (${igConfig.accessToken.slice(0, 15)}...). Please provide a valid Meta Access Token or switch back to Sandbox Test Mode in Instagram Setup.`;
+        }
+
         return res.status(400).json({
-          error:
-            containerData.error?.message ||
-            'Failed to create Instagram media container. Check permissions and image accessibility.',
+          error: errorMsg,
           details: containerData.error,
         });
       }
@@ -1030,10 +1379,16 @@ Respond with strict JSON:
 
       const publishData: any = await publishRes.json();
       if (!publishRes.ok || !publishData.id) {
+        let errorMsg =
+          publishData.error?.message ||
+          'Failed to finalize Instagram publication container.';
+        if (errorMsg.toLowerCase().includes('malformed access token')) {
+          errorMsg =
+            'Meta API rejected the Access Token as malformed. Please provide a valid Meta Access Token or switch to Sandbox Test Mode.';
+        }
+
         return res.status(400).json({
-          error:
-            publishData.error?.message ||
-            'Failed to finalize Instagram publication container.',
+          error: errorMsg,
           details: publishData.error,
         });
       }

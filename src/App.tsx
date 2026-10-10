@@ -323,6 +323,10 @@ export default function App() {
           setActiveTab('instagram');
           return;
         }
+        if (data.code === 'SIMULATED_TOKEN_IN_LIVE_MODE') {
+          showToast(data.error, 'error');
+          return;
+        }
         throw new Error(data.error || 'Failed to publish to Instagram');
       }
 
@@ -401,6 +405,17 @@ export default function App() {
             onNavigateTab={setActiveTab}
             onTriggerAutomation={handleTriggerAutomationNow}
             username={settings.instagramConfig.username || 'content_creator_hub'}
+            instagramConfig={settings.instagramConfig}
+            onToggleMode={async (testMode) => {
+              const updated = { ...settings.instagramConfig, testMode };
+              await handleUpdateSettings({ instagramConfig: updated });
+              showToast(
+                testMode
+                  ? 'Switched to Sandbox Test Mode (Safe simulation)'
+                  : 'Switched to Live Instagram Mode (Real publishing)!',
+                'success'
+              );
+            }}
           />
         )}
 
@@ -435,6 +450,18 @@ export default function App() {
                       isRegeneratingCaption={isRegeneratingCaption}
                       isPublishing={isPublishing}
                       onShowToast={showToast}
+                      instagramConfig={settings.instagramConfig}
+                      onToggleMode={async (testMode) => {
+                        const updated = { ...settings.instagramConfig, testMode };
+                        await handleUpdateSettings({ instagramConfig: updated });
+                        showToast(
+                          testMode
+                            ? 'Switched to Sandbox Test Mode (Safe simulation)'
+                            : 'Switched to Live Instagram Mode (Real publishing)!',
+                          'success'
+                        );
+                      }}
+                      onNavigateTab={(tab) => setActiveTab(tab as any)}
                     />
 
                     <ImageCreator

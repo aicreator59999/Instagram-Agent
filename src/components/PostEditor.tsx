@@ -13,8 +13,10 @@ import {
   Video,
   Layers,
   FileText,
+  AlertCircle,
+  ShieldCheck,
 } from 'lucide-react';
-import { Post, ReelScene, CarouselSlide } from '../types.js';
+import { Post, ReelScene, CarouselSlide, InstagramConfig } from '../types.js';
 
 interface PostEditorProps {
   post: Post;
@@ -28,6 +30,9 @@ interface PostEditorProps {
   isRegeneratingCaption: boolean;
   isPublishing: boolean;
   onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  instagramConfig?: InstagramConfig;
+  onToggleMode?: (testMode: boolean) => Promise<void>;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export const PostEditor: React.FC<PostEditorProps> = ({
@@ -42,6 +47,9 @@ export const PostEditor: React.FC<PostEditorProps> = ({
   isRegeneratingCaption,
   isPublishing,
   onShowToast,
+  instagramConfig,
+  onToggleMode,
+  onNavigateTab,
 }) => {
   const [copiedCaption, setCopiedCaption] = useState(false);
   const [copiedHashtags, setCopiedHashtags] = useState(false);
@@ -448,20 +456,107 @@ export const PostEditor: React.FC<PostEditorProps> = ({
         </div>
       )}
 
+      {/* Notice / Warning Banners */}
+      {!post.imageUrl && (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-base">⚠️</span>
+            <span>
+              <strong>Image Required for Live Instagram:</strong> The official Instagram API requires an image asset to publish. Use the <em>Image Creator</em> section below to generate or upload an image.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Target Destination Indicator */}
+      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className="text-slate-500 font-medium">Publishing Target:</span>
+        {instagramConfig?.testMode ? (
+          <span className="flex items-center gap-1.5 font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-200">
+            <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+            <span>Sandbox Test Mode (Safe Simulation — Verifies Flow Inside App)</span>
+          </span>
+        ) : instagramConfig?.isConnected ? (
+          instagramConfig?.isSimulatedToken ? (
+            <span className="flex items-center gap-1.5 font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-300">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Live Mode (Demo Token: EAAB_token_... — Requires Real Token)</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Live Instagram Account (@{instagramConfig.username} — Real Post)</span>
+            </span>
+          )
+        ) : (
+          <span className="flex items-center gap-1.5 font-semibold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-md border border-rose-200">
+            <span>Live Mode Active (Not Connected to Instagram)</span>
+          </span>
+        )}
+      </div>
+
+      {/* Notice if in Live Mode with Sandbox Simulation Token */}
+      {!instagramConfig?.testMode && instagramConfig?.isSimulatedToken && (
+        <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold flex items-center gap-1.5 text-amber-900">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Sandbox Demo Token Detected in Live Mode</span>
+            </span>
+            <span className="text-[10px] bg-amber-200/80 text-amber-900 font-mono px-2 py-0.5 rounded">
+              EAAB_token_...
+            </span>
+          </div>
+          <p className="text-[11px] text-amber-800 leading-relaxed">
+            Your connected account is using a demonstration token. Meta Graph API rejects demo tokens on live endpoints with <strong>"malformed access token"</strong>.
+          </p>
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            {onToggleMode && (
+              <button
+                type="button"
+                onClick={() => onToggleMode(true)}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition shadow-2xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Switch to Sandbox Test Mode (Safe)</span>
+              </button>
+            )}
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('instagram')}
+                className="px-3 py-1.5 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-semibold transition cursor-pointer"
+              >
+                <span>Connect Real Meta Token in Setup →</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Publishing & Scheduling Footer */}
       <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
         {/* Schedule Date Picker */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setShowScheduleInput(!showScheduleInput)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              post.status === 'scheduled'
+                ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                : 'text-slate-700 bg-slate-100 hover:bg-slate-200'
+            }`}
           >
             <Calendar className="w-3.5 h-3.5 text-slate-500" />
             <span>
               {post.scheduledDate
-                ? `Scheduled: ${new Date(post.scheduledDate).toLocaleDateString()}`
-                : 'Schedule Post'}
+                ? `Scheduled for: ${new Date(post.scheduledDate).toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}`
+                : 'Schedule for Later'}
             </span>
           </button>
 
@@ -479,6 +574,12 @@ export const PostEditor: React.FC<PostEditorProps> = ({
               }}
               className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 bg-white"
             />
+          )}
+
+          {post.status === 'scheduled' && post.scheduledDate && (
+            <span className="text-[11px] text-slate-500">
+              (Will auto-publish when time arrives)
+            </span>
           )}
         </div>
 
@@ -505,7 +606,7 @@ export const PostEditor: React.FC<PostEditorProps> = ({
           ) : (
             <>
               <Send className="w-3.5 h-3.5" />
-              <span>Publish to Instagram</span>
+              <span>Publish to Instagram Now</span>
             </>
           )}
         </button>

@@ -14,6 +14,9 @@ import {
   Sliders,
   ChevronDown,
   ChevronUp,
+  Radio,
+  Send,
+  Zap,
 } from 'lucide-react';
 import { InstagramConfig } from '../types.js';
 
@@ -36,6 +39,10 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [copiedCallback, setCopiedCallback] = useState(false);
+  const [directToken, setDirectToken] = useState('');
+  const [directAccountId, setDirectAccountId] = useState('');
+  const [isConnectingDirect, setIsConnectingDirect] = useState(false);
+  const [showDirectTokenSection, setShowDirectTokenSection] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
@@ -51,7 +58,6 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
   // Listen for OAuth postMessage events from the popup
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
-      // Validate origin if not localhost
       if (
         event.origin &&
         !event.origin.endsWith('.run.app') &&
@@ -93,6 +99,23 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
     return () => window.removeEventListener('message', handleOAuthMessage);
   }, [onShowToast, onRefreshSettings]);
 
+  // Toggle Mode: Sandbox vs Live
+  const handleToggleMode = async (newTestMode: boolean) => {
+    const updated = { ...formData, testMode: newTestMode };
+    setFormData(updated);
+    try {
+      await onSaveConfig(updated);
+      onShowToast(
+        newTestMode
+          ? 'Switched to Sandbox Test Mode (Safe simulation inside app)'
+          : 'Switched to Live Instagram Mode (Real publishing enabled)!',
+        'success'
+      );
+    } catch (err: any) {
+      onShowToast(err.message || 'Failed to update publishing mode', 'error');
+    }
+  };
+
   // 1-Click Connect Button
   const handleConnectInstagram = async () => {
     setIsConnecting(true);
@@ -106,7 +129,6 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
         throw new Error(data.error || 'Failed to initialize authorization');
       }
 
-      // Open OAuth URL in popup
       const popupWidth = 620;
       const popupHeight = 720;
       const left = window.screenX + (window.outerWidth - popupWidth) / 2;
@@ -168,7 +190,7 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
         body: JSON.stringify({
           instagramAccountId: formData.instagramAccountId,
           accessToken: formData.accessToken,
-          testMode: formData.authMethod === 'sandbox_oauth' || formData.testMode,
+          testMode: formData.testMode,
         }),
       });
 
@@ -176,7 +198,7 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
       if (res.ok && data.success) {
         setTestResult({
           success: true,
-          message: data.message || 'Instagram publishing credentials verified successfully!',
+          message: data.message || 'Instagram connection verified successfully!',
         });
         onShowToast('Instagram connection verified!', 'success');
       } else {
@@ -196,7 +218,54 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
     }
   };
 
-  // Save Meta App ID / Secret (Optional custom app settings)
+  // Direct Real Meta Token Connection
+  const handleConnectDirectToken = async () => {
+    if (!directToken.trim()) {
+      onShowToast('Please enter your Meta Access Token', 'error');
+      return;
+    }
+    setIsConnectingDirect(true);
+    setTestResult(null);
+
+    try {
+      const res = await fetch('/api/instagram/connect-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: directToken.trim(),
+          instagramAccountId: directAccountId.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to verify Meta token');
+      }
+
+      onShowToast(data.message || 'Connected to Instagram live API!', 'success');
+      setTestResult({
+        success: true,
+        message: data.message || 'Meta token verified and connected successfully!',
+      });
+      setDirectToken('');
+      setDirectAccountId('');
+      setShowDirectTokenSection(false);
+
+      if (onRefreshSettings) {
+        onRefreshSettings();
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err.message || 'Token verification failed',
+      });
+      onShowToast(err.message || 'Token verification failed', 'error');
+    } finally {
+      setIsConnectingDirect(false);
+    }
+  };
+
+  // Save Meta App ID / Secret
   const handleSaveAdvanced = async () => {
     try {
       await onSaveConfig(formData);
@@ -224,32 +293,220 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
         <div>
           <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <Instagram className="w-5 h-5 text-purple-600" />
-            <span>Official Instagram Authorization</span>
+            <span>Instagram Setup & Publishing Modes</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Connect via Meta OAuth. Your Instagram Professional Account ID is auto-discovered with zero guessing.
+            Switch between Sandbox Test Mode and Live Instagram Mode, and authorize your account.
           </p>
         </div>
 
         {/* Status Badge */}
-        <div>
-          {formData.isConnected ? (
-            <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Connected (@{formData.username})</span>
+        <div className="flex items-center gap-2">
+          {!formData.testMode ? (
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-600" />
+              <span>Live Mode Active</span>
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-xs font-medium">
-              <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
-              <span>Not Connected</span>
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-800 border border-purple-200 rounded-lg text-xs font-bold">
+              <span className="w-2 h-2 rounded-full bg-purple-600 animate-pulse" />
+              <span>Sandbox Mode Active</span>
             </span>
           )}
         </div>
       </div>
 
-      {/* STATE 1: ALREADY CONNECTED */}
-      {formData.isConnected ? (
-        <div className="space-y-4">
+      {/* --- PROMINENT MODE SWITCHER: SANDBOX VS LIVE --- */}
+      <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50/80 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span className="text-xs font-extrabold text-slate-900 block uppercase tracking-wider">
+              1. Choose Your Publishing Mode
+            </span>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Select whether you want to test safely inside the studio or publish to real Instagram.
+            </p>
+          </div>
+
+          {/* Segmented Controls */}
+          <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-xs">
+            <button
+              onClick={() => handleToggleMode(true)}
+              className={`px-3.5 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                formData.testMode
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Sandbox Test Mode</span>
+            </button>
+
+            <button
+              onClick={() => handleToggleMode(false)}
+              className={`px-3.5 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                !formData.testMode
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              <span>Live Instagram Mode</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Explanatory Callout Box for Current Mode */}
+        {formData.testMode ? (
+          <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 text-xs space-y-1">
+            <div className="font-bold flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-purple-600" />
+              <span>Currently in Sandbox Test Mode (Safe Simulation)</span>
+            </div>
+            <p className="text-[11px] text-purple-800 leading-relaxed">
+              When you click "Publish" or schedule a post, it is verified and simulated inside the app with an ID like <code className="bg-white px-1 rounded border">ig_test_...</code>. <strong>Posts will NOT go to your real Instagram profile</strong> in this mode.
+            </p>
+          </div>
+        ) : (
+          <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs space-y-2">
+            <div className="font-bold flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-600" />
+              <span>Currently in Live Instagram Mode (Real Publishing)</span>
+            </div>
+            <p className="text-[11px] text-emerald-800 leading-relaxed">
+              When you click "Publish" or when a scheduled post's time arrives, <strong>the post is delivered directly to your real Instagram feed</strong> using the official Meta Graph API.
+            </p>
+            {!formData.isConnected && (
+              <p className="text-[11px] font-semibold text-rose-700 pt-1">
+                ⚠️ Action Required: Please authorize your Instagram Professional account below so Meta allows the agent to publish.
+              </p>
+            )}
+
+            {/* Amber Alert if in Live Mode but using a Sandbox Simulation Token */}
+            {formData.isConnected && formData.isSimulatedToken && (
+              <div className="p-3 bg-amber-100/90 border border-amber-300 rounded-xl text-amber-950 space-y-2 mt-2">
+                <div className="font-bold flex items-center gap-1.5 text-xs text-amber-900">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Sandbox Demonstration Token Detected in Live Mode</span>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Your account is currently using a Sandbox demo token (<code className="bg-white/80 px-1 py-0.5 rounded font-mono text-[10px]">EAAB_token_...</code>).
+                  Meta’s live API will reject this token with <strong>malformed access token</strong> because it is a demonstration token.
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleMode(true)}
+                    className="px-3 py-1.5 text-xs font-bold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Switch Back to Sandbox Test Mode (Safe)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDirectTokenSection(true)}
+                    className="px-3 py-1.5 text-xs font-semibold bg-white text-amber-900 border border-amber-300 hover:bg-amber-50 rounded-lg transition cursor-pointer"
+                  >
+                    <span>Paste Real Meta Access Token</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* --- SECTION 2: ACCOUNT AUTHORIZATION --- */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-xs font-extrabold text-slate-900 block uppercase tracking-wider">
+              2. Instagram Account Connection
+            </span>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Authorize your Instagram Professional account. Your Account ID is automatically detected.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowDirectTokenSection(!showDirectTokenSection)}
+            className="text-xs font-semibold text-purple-700 hover:text-purple-900 flex items-center gap-1 underline"
+          >
+            <Key className="w-3.5 h-3.5" />
+            <span>{showDirectTokenSection ? 'Hide Token Input' : 'Paste Real Meta Access Token'}</span>
+          </button>
+        </div>
+
+        {/* Direct Token Input Panel */}
+        {showDirectTokenSection && (
+          <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 space-y-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                <Key className="w-4 h-4 text-purple-600" />
+                <span>Connect Direct Meta Graph Access Token</span>
+              </span>
+              <span className="text-[10px] text-purple-700 font-medium bg-purple-100 px-2 py-0.5 rounded">
+                For Live Publishing
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Have a Meta User or Page Access Token from <strong>Meta for Developers (developers.facebook.com)</strong> or <strong>Graph API Explorer</strong>? Paste it below to connect directly without setting up full OAuth redirect:
+            </p>
+
+            <div className="space-y-2">
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Meta Access Token (starts with EAA...)
+                </label>
+                <input
+                  type="password"
+                  value={directToken}
+                  onChange={(e) => setDirectToken(e.target.value)}
+                  placeholder="Paste your EAAG... or EAAB... token here"
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Instagram Business Account ID (Optional — auto-discovered if blank)
+                </label>
+                <input
+                  type="text"
+                  value={directAccountId}
+                  onChange={(e) => setDirectAccountId(e.target.value)}
+                  placeholder="e.g. 17841400829103847 (optional)"
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 bg-white"
+                />
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleConnectDirectToken}
+                  disabled={isConnectingDirect || !directToken.trim()}
+                  className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isConnectingDirect ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Verifying with Meta API...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Verify & Connect Real Token</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {formData.isConnected ? (
+          /* STATE 1: ALREADY CONNECTED */
           <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-full p-[2px] bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 shrink-0">
@@ -263,9 +520,21 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
                   <span className="text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">
                     {formData.accountType || 'Professional'} Account
                   </span>
+                  {formData.isSimulatedToken ? (
+                    <span className="text-[10px] font-bold bg-amber-200 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full">
+                      Sandbox Demo Token
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
+                      Live Meta Token
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-emerald-800 mt-0.5">
                   Linked Facebook Page: <strong>{formData.facebookPageName || 'Creator Page'}</strong>
+                </p>
+                <p className="text-[11px] font-mono text-slate-600 mt-0.5">
+                  Auto-Discovered ID: <strong>{formData.instagramAccountId}</strong>
                 </p>
               </div>
             </div>
@@ -277,7 +546,7 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
                 className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-white text-slate-800 border border-emerald-300 hover:bg-emerald-100 rounded-xl transition-colors shadow-2xs"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isTesting ? 'animate-spin' : ''}`} />
-                <span>{isTesting ? 'Verifying...' : 'Verify Status'}</span>
+                <span>{isTesting ? 'Verifying...' : 'Verify Token'}</span>
               </button>
 
               <button
@@ -290,59 +559,19 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
               </button>
             </div>
           </div>
-
-          {/* Auto-Discovered Account Details Box */}
-          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-            <span className="text-xs font-bold text-slate-800 block">
-              Auto-Discovered Instagram Account Details
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-white rounded-lg border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase block">
-                  Instagram Account ID
-                </span>
-                <span className="font-mono font-bold text-slate-800 text-sm">
-                  {formData.instagramAccountId}
-                </span>
-                <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">
-                  ✓ Automatically detected via Meta API
-                </span>
-              </div>
-
-              <div className="p-3 bg-white rounded-lg border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase block">
-                  Publishing Permissions Active
-                </span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  <span className="text-[10px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-100">
-                    instagram_content_publish
-                  </span>
-                  <span className="text-[10px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-100">
-                    pages_show_list
-                  </span>
-                  <span className="text-[10px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-100">
-                    instagram_basic
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* STATE 2: NOT CONNECTED (BEGINNER ONBOARDING FLOW) */
-        <div className="space-y-6">
-          {/* Main Action Callout */}
+        ) : (
+          /* STATE 2: NOT CONNECTED (1-CLICK CONNECT FLOW) */
           <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="space-y-2 max-w-lg">
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/10 text-rose-300 text-[11px] font-semibold">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Zero Manual Setup Required for Beginners</span>
+                <span>Zero Guessing Required</span>
               </div>
               <h3 className="text-lg font-extrabold tracking-tight">
                 Connect Your Professional Instagram Account
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Click below to open the official Meta Instagram authorization popup. Log into your account and grant access. We will <strong>automatically fetch your Instagram Account ID</strong> and store credentials securely on your server.
+                Click below to open the official Meta Instagram authorization popup. We will <strong>automatically fetch your Instagram Account ID</strong> and link your Page.
               </p>
             </div>
 
@@ -364,41 +593,8 @@ export const InstagramIntegrationModal: React.FC<InstagramIntegrationModalProps>
               )}
             </button>
           </div>
-
-          {/* Simple 3-Step Process for Beginners */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 text-xs">
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
-              <div className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center text-xs">
-                1
-              </div>
-              <h4 className="font-bold text-slate-900 text-xs">Click Connect</h4>
-              <p className="text-slate-500 text-[11px] leading-relaxed">
-                A secure Meta authorization window opens. Your Instagram password is never seen or stored by this app.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
-              <div className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center text-xs">
-                2
-              </div>
-              <h4 className="font-bold text-slate-900 text-xs">Authorize Permissions</h4>
-              <p className="text-slate-500 text-[11px] leading-relaxed">
-                Grant publishing and page access so the agent can publish your approved posts and reels.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
-              <div className="w-6 h-6 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-xs">
-                3
-              </div>
-              <h4 className="font-bold text-slate-900 text-xs">Auto-ID Discovery</h4>
-              <p className="text-slate-500 text-[11px] leading-relaxed">
-                The server automatically detects your 17-digit Instagram Business/Creator Account ID and completes the setup.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Test Result Message */}
       {testResult && (

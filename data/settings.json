@@ -11,14 +11,15 @@
     "timezone": "UTC"
   },
   "instagramConfig": {
-    "isConnected": false,
-    "accountType": "Not Connected",
-    "instagramAccountId": "17841400998877665",
+    "isConnected": true,
+    "accountType": "Creator",
+    "instagramAccountId": "17841400113949399",
     "facebookPageId": "102938475610293",
-    "accessToken": "",
-    "username": "test_creator",
+    "accessToken": "EAAB_token_1791649914558",
+    "username": "anild5526",
     "testMode": true,
-    "lastTestStatus": null,
+    "lastTestedAt": "2026-10-10T16:31:54.559Z",
+    "lastTestStatus": "success",
     "lastErrorMessage": null,
     "hasToken": false,
     "facebookPageName": "Creator Official Page",
@@ -29,7 +30,8 @@
       "pages_show_list",
       "pages_read_engagement"
     ],
-    "connectedAt": "2026-10-10T10:37:30.369Z"
+    "connectedAt": "2026-10-10T16:31:54.559Z",
+    "hasAppSecret": false
   },
   "automationConfig": {
     "dailyAutomationEnabled": false,
@@ -37,6 +39,21 @@
     "timezone": "Asia/Kolkata",
     "autoPublish": false,
     "logs": [
+      {
+        "id": "log-1791650964128",
+        "timestamp": "2026-10-10T16:49:24.128Z",
+        "action": "Post Published (Test Mode)",
+        "status": "success",
+        "message": "Post \"5 AI Tools Every Creator Needs in 2026\" published to Instagram Sandbox (ID: ig_test_1791650964124).",
+        "postId": "post-seed-1"
+      },
+      {
+        "id": "log-1791649914559",
+        "timestamp": "2026-10-10T16:31:54.559Z",
+        "action": "Instagram Account Authorized",
+        "status": "success",
+        "message": "Successfully connected @anild5526. Account ID automatically detected (17841400113949399)."
+      },
       {
         "id": "log-1791628660479",
         "timestamp": "2026-10-10T10:37:40.479Z",

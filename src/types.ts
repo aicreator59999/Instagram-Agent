@@ -93,6 +93,7 @@ export interface InstagramConfig {
   metaAppId?: string;
   metaAppSecret?: string;
   authMethod?: 'oauth_meta_graph' | 'sandbox_oauth';
+  isSimulatedToken?: boolean;
   lastTestedAt?: string;
   lastTestStatus?: 'success' | 'error' | null;
   lastErrorMessage?: string | null;

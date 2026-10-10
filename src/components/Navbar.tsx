@@ -9,6 +9,7 @@ import {
   PlusCircle,
   CheckCircle2,
   ShieldAlert,
+  AlertCircle,
 } from 'lucide-react';
 import { InstagramConfig } from '../types.js';
 
@@ -123,29 +124,38 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Status Indicator */}
           <button
             onClick={() => onSelectTab('instagram')}
-            className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-              instagramConfig.isConnected
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+            className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+              !instagramConfig.testMode && instagramConfig.isConnected
+                ? instagramConfig.isSimulatedToken
+                  ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                 : instagramConfig.testMode
-                ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
-                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                ? 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100'
+                : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
             }`}
-            title="Click to manage Instagram connection"
+            title="Click to configure Instagram settings"
           >
-            {instagramConfig.isConnected ? (
-              <>
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>@{instagramConfig.username}</span>
-              </>
+            {!instagramConfig.testMode && instagramConfig.isConnected ? (
+              instagramConfig.isSimulatedToken ? (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Live (Demo Token): @{instagramConfig.username}</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Live: @{instagramConfig.username}</span>
+                </>
+              )
             ) : instagramConfig.testMode ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-                <span>Sandbox Test Mode</span>
+                <span>Mode: Sandbox</span>
               </>
             ) : (
               <>
-                <ShieldAlert className="w-3.5 h-3.5 text-slate-400" />
-                <span>IG Not Connected</span>
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+                <span>Mode: Live (Not Connected)</span>
               </>
             )}
           </button>
